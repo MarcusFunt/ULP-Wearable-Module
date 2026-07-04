@@ -1,0 +1,10 @@
+# Python dependencies for repository validation scripts.
+# Hardware CAD, firmware SDKs, KiCad, ngspice, and Nordic tools are installed separately.
+
+skidl>=2.0
+numpy>=1.26
+matplotlib>=3.8
+schemdraw>=0.19
+networkx>=3.2
+pytest>=8.0
+ruff>=0.5
