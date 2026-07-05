@@ -42,3 +42,8 @@ Thumbs.db
 
 # Local measurement dumps; curate before committing
 measurements/raw/
+
+# Vendor component library archives (licensed, not for redistribution).
+# Keep these locally; generate_preliminary_schematic.py reads them from
+# ULP_WM_VENDOR_ZIP_DIR (default ~/Downloads).
+/Components/
