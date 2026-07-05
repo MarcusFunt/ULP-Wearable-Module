@@ -25,7 +25,14 @@ dist/
 *.bak
 *.tmp
 *.autosave
+*.lck
 fp-info-cache
+# KiCad local history (auto-backup snapshots; restore via File > Local History)
+.history/
+# KiCad ERC reports and generated netlists
+*.erc
+*-erc.rpt
+*.net
 
 # OS/editor
 .DS_Store

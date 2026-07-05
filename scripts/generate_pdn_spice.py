@@ -12,9 +12,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from skidl.pyspice import C, GND, I, R, V, ERC, Net, generate_netlist, reset
+from skidl.pyspice import ERC, GND, C, I, Net, R, V, generate_netlist, reset
 
 OUT = Path("build/pdn")
+
+# SKiDL otherwise creates .log/.erc/.net/backup-library files in the current directory.
+generate_netlist.__self__.no_files = True
 
 
 @dataclass(frozen=True)
@@ -41,14 +44,14 @@ class PulseLoad:
         high = (x >= self.rise_s) & (x < self.rise_s + self.width_s)
         y[high] = self.high_a
 
-        falling = (
-            (x >= self.rise_s + self.width_s)
-            & (x < self.rise_s + self.width_s + self.fall_s)
-        )
+        falling = (x >= self.rise_s + self.width_s) & (x < self.rise_s + self.width_s + self.fall_s)
         if self.fall_s > 0:
-            y[falling] = self.high_a - (self.high_a - self.low_a) * (
-                x[falling] - self.rise_s - self.width_s
-            ) / self.fall_s
+            y[falling] = (
+                self.high_a
+                - (self.high_a - self.low_a)
+                * (x[falling] - self.rise_s - self.width_s)
+                / self.fall_s
+            )
 
         cur[active] = y
         return cur
@@ -128,6 +131,7 @@ RAILS = [
 def build_skidl_netlist() -> str:
     """Build a SKiDL circuit and return its generated SPICE-like netlist."""
     reset()
+    generate_netlist.__self__.no_files = True
     gnd = GND
 
     bat_cell = Net("BAT_CELL")
@@ -151,7 +155,7 @@ def build_skidl_netlist() -> str:
             I(ref=pulse.name, dc_value=pulse.high_a)["p", "n"] += out, gnd
 
     ERC()
-    return str(generate_netlist())
+    return str(generate_netlist(do_backup=False))
 
 
 def cap_string(value_f: float) -> str:
@@ -202,7 +206,18 @@ def export_clean_spice() -> str:
     return "\n".join(lines)
 
 
-def simulate_rail(rail: Rail, t_end_s: float = 20e-3, dt_s: float = 1e-6) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def simulate_rail(
+    rail: Rail, t_end_s: float = 20e-3, dt_s: float = 1e-6
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if dt_s <= 0:
+        raise ValueError("dt_s must be positive")
+    if t_end_s < 0:
+        raise ValueError("t_end_s must be non-negative")
+    if rail.source_r_ohm <= 0:
+        raise ValueError(f"{rail.name}: source resistance must be positive")
+    if rail.cap_total_f <= 0:
+        raise ValueError(f"{rail.name}: output capacitance must be positive")
+
     t = np.arange(0, t_end_s + dt_s, dt_s)
     load = np.full_like(t, rail.base_load_a, dtype=float)
     for pulse in rail.pulse_loads:
@@ -210,9 +225,10 @@ def simulate_rail(rail: Rail, t_end_s: float = 20e-3, dt_s: float = 1e-6) -> tup
 
     v = np.empty_like(t)
     v[0] = rail.nominal_v - rail.source_r_ohm * load[0]
+    decay = np.exp(-dt_s / (rail.source_r_ohm * rail.cap_total_f))
     for idx in range(1, len(t)):
-        dvdt = ((rail.nominal_v - v[idx - 1]) / rail.source_r_ohm - load[idx - 1]) / rail.cap_total_f
-        v[idx] = v[idx - 1] + dvdt * dt_s
+        steady_state_v = rail.nominal_v - rail.source_r_ohm * load[idx]
+        v[idx] = steady_state_v + (v[idx - 1] - steady_state_v) * decay
     return t, v, load
 
 
@@ -309,10 +325,14 @@ def main() -> int:
             f"min={result['min_v']:.4f} V, droop={result['max_droop_mv']:.2f} mV, "
             f"result={'PASS' if result['pass'] else 'FAIL'}"
         )
+    failed_rails = [rail for rail, result in results.items() if not result["pass"]]
     if errors:
         print("Errors:")
         for error in errors:
             print(f"- {error}")
+    if failed_rails:
+        print(f"Failed rails: {', '.join(failed_rails)}")
+    if errors or failed_rails:
         return 1
     return 0
 
